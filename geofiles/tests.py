@@ -2,6 +2,7 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+from unittest.mock import PropertyMock, patch
 
 import geopandas as gpd
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -47,6 +48,10 @@ class FileApiTests(TestCase):
         self.assertEqual(geospatial_file.file_type, GeospatialFile.FileType.KML)
         self.assertEqual(geospatial_file.status, GeospatialFile.Status.QUEUED)
         self.assertEqual(
+            geospatial_file.file.name,
+            f"uploads/{geospatial_file.id}/survey.kml",
+        )
+        self.assertEqual(
             response.headers["Location"],
             reverse("file-detail", kwargs={"pk": geospatial_file.pk}),
         )
@@ -60,6 +65,23 @@ class FileApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(GeospatialFile.objects.count(), 0)
+
+    def test_uploads_with_the_same_filename_use_different_object_keys(self):
+        for _ in range(2):
+            response = self.client.post(
+                reverse("file-upload"),
+                {"file": SimpleUploadedFile("survey.kml", b"<kml />")},
+                format="multipart",
+            )
+            self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+
+        stored_names = list(
+            GeospatialFile.objects.order_by("created_at").values_list(
+                "file", flat=True
+            )
+        )
+        self.assertEqual(len(set(stored_names)), 2)
+        self.assertTrue(all(name.endswith("/survey.kml") for name in stored_names))
 
     def test_upload_rejects_large_file(self):
         response = self.client.post(
@@ -192,7 +214,12 @@ class WorkerProcessingTests(TestCase):
             status=GeospatialFile.Status.PROCESSING,
         )
 
-        process_geospatial_file(geospatial_file)
+        with patch(
+            "django.db.models.fields.files.FieldFile.path",
+            new_callable=PropertyMock,
+            side_effect=NotImplementedError,
+        ):
+            process_geospatial_file(geospatial_file)
 
         geospatial_file.refresh_from_db()
         self.assertEqual(geospatial_file.status, GeospatialFile.Status.COMPLETED)
