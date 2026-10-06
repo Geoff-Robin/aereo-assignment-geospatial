@@ -15,7 +15,7 @@ A Django REST API that accepts KML files and zipped Shapefiles, processes them a
 Docker Compose starts PostgreSQL, applies migrations, runs one API service, and creates the worker service. Scale the worker service to the required three workers:
 
 ```bash
-docker compose up --build --scale worker=3
+docker compose up --build -d --scale worker=3
 ```
 
 The API is available at `http://localhost:8000`.
