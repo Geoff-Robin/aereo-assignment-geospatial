@@ -7,7 +7,11 @@ x-app-environment: &app-environment
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-secret}
   DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
-  MEDIA_ROOT: /data/media
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  S3_BUCKET_NAME: ${MINIO_BUCKET:-geospatial-files}
+  S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
   MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
   MAX_ARCHIVE_UNCOMPRESSED_SIZE: ${MAX_ARCHIVE_UNCOMPRESSED_SIZE:-209715200}
 
@@ -26,6 +30,31 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  minio:
+    build:
+      context: .
+      dockerfile: Dockerfile.minio
+    image: aereo-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: aereo-app
+    depends_on:
+      minio:
+        condition: service_started
+    environment: *app-environment
+    command: python manage.py ensure_storage_bucket
+    restart: "no"
+
   migrate:
     build: .
     image: aereo-app
@@ -34,8 +63,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - uploaded-files:/data/media
+      minio-init:
+        condition: service_completed_successfully
     restart: "no"
 
   api:
@@ -47,8 +76,6 @@ services:
         condition: service_completed_successfully
     ports:
       - "8000:8000"
-    volumes:
-      - uploaded-files:/data/media
     restart: unless-stopped
 
   worker:
@@ -58,10 +85,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    volumes:
-      - uploaded-files:/data/media
     restart: unless-stopped
 
 volumes:
   postgres-data:
-  uploaded-files:
+  minio-data:

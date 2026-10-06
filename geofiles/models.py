@@ -1,6 +1,12 @@
 import uuid
+from pathlib import Path
 
 from django.db import models
+
+
+def geospatial_file_upload_path(instance, filename: str) -> str:
+    safe_filename = Path(filename.replace("\\", "/")).name
+    return f"uploads/{instance.id}/{safe_filename}"
 
 
 class GeospatialFile(models.Model):
@@ -15,7 +21,7 @@ class GeospatialFile(models.Model):
         FAILED = "FAILED", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    file = models.FileField(upload_to="uploads/")
+    file = models.FileField(upload_to=geospatial_file_upload_path)
     filename = models.CharField(max_length=255)
     file_type = models.CharField(max_length=20, choices=FileType.choices)
     status = models.CharField(

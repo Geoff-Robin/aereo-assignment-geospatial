@@ -4,6 +4,7 @@ import math
 import shutil
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
@@ -44,9 +45,8 @@ class ProcessedDataset:
 
 
 def process_geospatial_file(geospatial_file: GeospatialFile) -> None:
-    dataset = load_and_measure(
-        Path(geospatial_file.file.path), geospatial_file.file_type
-    )
+    with _materialize_uploaded_file(geospatial_file) as local_path:
+        dataset = load_and_measure(local_path, geospatial_file.file_type)
 
     feature_rows = [
         Feature(
@@ -103,6 +103,20 @@ def load_and_measure(file_path: Path, file_type: str) -> ProcessedDataset:
         raise ProcessingError(f"Unsupported file type: {file_type}")
 
     return measure_geodataframe(gdf)
+
+
+@contextmanager
+def _materialize_uploaded_file(geospatial_file: GeospatialFile):
+    suffix = Path(geospatial_file.file.name).suffix
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        local_path = Path(temporary_directory) / f"source{suffix}"
+        try:
+            with geospatial_file.file.open("rb") as source:
+                with local_path.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+        except Exception as error:
+            raise ProcessingError("The uploaded file could not be read.") from error
+        yield local_path
 
 
 def measure_geodataframe(gdf: gpd.GeoDataFrame) -> ProcessedDataset:
